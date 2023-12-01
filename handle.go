@@ -12,7 +12,7 @@ type multiTaskHandler struct {
 	ts []Tasker
 	wg *sync.WaitGroup
 	ch chan interface{}
-	m  sync.Map
+	m  []interface{}
 }
 
 func NewHandler() *multiTaskHandler {
@@ -37,15 +37,19 @@ func (m *multiTaskHandler) Run() {
 		go m.exec(ctx, fun)
 	}
 
-	m.wg.Wait()
+	go func() {
+		defer close(m.ch)
+		m.wg.Wait()
+	}()
+
+	for d := range m.ch {
+		m.m = append(m.m, d)
+	}
 }
 
 func (m *multiTaskHandler) Visit(f func(v interface{})) {
-	for _, tasker := range m.ts {
-		load, ok := m.m.Load(tasker.getName())
-		if ok {
-			f(load)
-		}
+	for _, data := range m.m {
+		f(data)
 	}
 }
 
@@ -58,16 +62,13 @@ func (m *multiTaskHandler) exec(ctx context.Context, t Tasker) {
 		defer cancel()
 	}
 
-	v := t.exec()
-
 	select {
 	case <-ctx.Done():
 		fmt.Println(t.getName(), "timeout")
 		return
 
-	default:
+	case m.ch <- t.exec():
 
 	}
 
-	m.m.Store(t.getName(), v)
 }
